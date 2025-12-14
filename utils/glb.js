@@ -102,9 +102,13 @@ async function generateGLB(options = {}) {
   document.getRoot().setDefaultScene(scene);
 
   // Add metadata
-  document.getRoot().getAsset()
-    .setGenerator('CityXZ GLB Generator')
-    .setExtras({ address });
+  const asset = document.getRoot().getAsset();
+  if (asset && typeof asset.generator !== 'undefined') {
+    asset.generator = 'CityXZ GLB Generator';
+  }
+  
+  // Add extras/metadata
+  document.getRoot().setExtras({ address });
 
   // Optimize
   await document.transform(
