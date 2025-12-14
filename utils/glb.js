@@ -1,17 +1,17 @@
 const { Document, NodeIO } = require('@gltf-transform/core');
 const { prune, weld } = require('@gltf-transform/functions');
 
-// Constants
-const PLATE_SIZE_MM = 218; // 218mm x 218mm
-const PLATE_THICKNESS_MM = 0.8; // 0.8mm thick
-const HEIGHTS_MM = {
-  road: 0.40,
-  water: 0.00,
-  waterDepth: 0.20,
-  grass: 0.40,
+// Constants (converted to meters for glTF)
+const PLATE_SIZE_M = 0.218; // 218mm = 0.218m
+const PLATE_THICKNESS_M = 0.0008; // 0.8mm = 0.0008m
+const HEIGHTS_M = {
+  road: 0.0004, // 0.40mm = 0.0004m
+  water: 0.0000, // 0.00mm
+  waterDepth: 0.0002, // 0.20mm = 0.0002m
+  grass: 0.0004, // 0.40mm = 0.0004m
   buildingScale: 1.20,
-  buildingMinHeight: 1.00,
-  sand: 0.20
+  buildingMinHeight: 0.001, // 1.00mm = 0.001m
+  sand: 0.0002 // 0.20mm = 0.0002m
 };
 const FILTERS = {
   waterMinArea: 10.0, // m²
@@ -75,9 +75,9 @@ function calculateArea(latLonPoints) {
 }
 
 /**
- * Transform lat/lon to local coordinates (mm on plate, centered at 0,0)
+ * Transform lat/lon to local coordinates (meters on plate, centered at 0,0)
  */
-function transformToPlateCoords(lat, lon, centerLat, centerLon, plateSizeMm, areaKm2) {
+function transformToPlateCoords(lat, lon, centerLat, centerLon, plateSizeM, areaKm2) {
   // Calculate distance in meters
   const latOffsetM = (lat - centerLat) * 111320; // meters per degree latitude
   const lonOffsetM = (lon - centerLon) * 111320 * Math.cos(centerLat * Math.PI / 180); // meters per degree longitude
@@ -87,11 +87,11 @@ function transformToPlateCoords(lat, lon, centerLat, centerLon, plateSizeMm, are
   const radiusKm = Math.sqrt(areaKm2 / Math.PI);
   const bboxSizeM = radiusKm * 2 * 1000; // meters (diameter)
   
-  // Scale to plate size (218mm)
-  const scale = plateSizeMm / bboxSizeM; // mm per meter
+  // Scale to plate size (0.218m = 218mm)
+  const scale = plateSizeM / bboxSizeM; // meters per meter
   
-  const x = lonOffsetM * scale; // mm (positive = east)
-  const y = -latOffsetM * scale; // mm (positive = north, flipped for Y-up)
+  const x = lonOffsetM * scale; // meters (positive = east)
+  const y = -latOffsetM * scale; // meters (positive = north, flipped for Y-up)
   
   return { x, y };
 }
@@ -165,17 +165,17 @@ function createExtrudedGeometry(points, height, baseHeight = 0) {
 }
 
 /**
- * Create base plate (218mm x 218mm x 0.8mm)
+ * Create base plate (0.218m x 0.218m x 0.0008m)
  */
-function createBasePlate(plateSizeMm, thicknessMm) {
-  const half = plateSizeMm / 2;
+function createBasePlate(plateSizeM, thicknessM) {
+  const half = plateSizeM / 2;
   const positions = new Float32Array([
     -half, -half, 0,      half, -half, 0,      half, half, 0,      -half, half, 0,  // Top
-    -half, -half, -thicknessMm,  -half, half, -thicknessMm,  half, half, -thicknessMm,  half, -half, -thicknessMm,  // Bottom
-    -half, -half, 0,      -half, half, 0,      -half, half, -thicknessMm,  -half, -half, -thicknessMm,  // Left
-    half, -half, 0,      half, -half, -thicknessMm,      half, half, -thicknessMm,  half, half, 0,  // Right
-    -half, half, 0,      half, half, 0,      half, half, -thicknessMm,  -half, half, -thicknessMm,  // Front
-    -half, -half, 0,      -half, -half, -thicknessMm,      half, -half, -thicknessMm,  half, -half, 0   // Back
+    -half, -half, -thicknessM,  -half, half, -thicknessM,  half, half, -thicknessM,  half, -half, -thicknessM,  // Bottom
+    -half, -half, 0,      -half, half, 0,      -half, half, -thicknessM,  -half, -half, -thicknessM,  // Left
+    half, -half, 0,      half, -half, -thicknessM,      half, half, -thicknessM,  half, half, 0,  // Right
+    -half, half, 0,      half, half, 0,      half, half, -thicknessM,  -half, half, -thicknessM,  // Front
+    -half, -half, 0,      -half, -half, -thicknessM,      half, -half, -thicknessM,  half, -half, 0   // Back
   ]);
 
   const normals = new Float32Array([
@@ -231,7 +231,7 @@ async function generateGLB(options = {}) {
   let vertexOffset = 0;
 
   // Create base plate
-  const plate = createBasePlate(PLATE_SIZE_MM, PLATE_THICKNESS_MM);
+  const plate = createBasePlate(PLATE_SIZE_M, PLATE_THICKNESS_M);
   const platePosAccessor = document.createAccessor().setType('VEC3').setArray(plate.positions);
   const plateNormAccessor = document.createAccessor().setType('VEC3').setArray(plate.normals);
   const plateIndAccessor = document.createAccessor().setType('SCALAR').setArray(plate.indices);
@@ -272,7 +272,7 @@ async function generateGLB(options = {}) {
       const area = calculateArea(latLonCoords);
 
       // Transform to plate coordinates
-      const coords = latLonCoords.map(n => transformToPlateCoords(n.lat, n.lon, lat, lon, PLATE_SIZE_MM, area_km2));
+      const coords = latLonCoords.map(n => transformToPlateCoords(n.lat, n.lon, lat, lon, PLATE_SIZE_M, area_km2));
 
       // Determine feature type and height
       let height = 0;
@@ -282,17 +282,17 @@ async function generateGLB(options = {}) {
       if (way.tags?.building) {
         if (area < FILTERS.buildingMinArea) skip = true;
         const buildingHeight = parseFloat(way.tags['building:levels'] || '1') * 3; // ~3m per floor
-        height = Math.max(HEIGHTS_MM.buildingMinHeight, buildingHeight * HEIGHTS_MM.buildingScale / 1000);
+        height = Math.max(HEIGHTS_M.buildingMinHeight, buildingHeight * HEIGHTS_M.buildingScale / 1000);
       } else if (way.tags?.highway) {
-        height = HEIGHTS_MM.road;
+        height = HEIGHTS_M.road;
       } else if (way.tags?.natural === 'water' || way.tags?.waterway) {
         if (area < FILTERS.waterMinArea) skip = true;
-        baseHeight = -HEIGHTS_MM.waterDepth;
-        height = HEIGHTS_MM.water;
+        baseHeight = -HEIGHTS_M.waterDepth;
+        height = HEIGHTS_M.water;
       } else if (way.tags?.landuse === 'grass' || way.tags?.landuse === 'meadow' || way.tags?.landuse === 'park') {
-        height = HEIGHTS_MM.grass;
+        height = HEIGHTS_M.grass;
       } else if (way.tags?.natural === 'beach' || way.tags?.natural === 'sand') {
-        height = HEIGHTS_MM.sand;
+        height = HEIGHTS_M.sand;
       } else {
         continue; // Skip unknown features
       }
@@ -312,7 +312,7 @@ async function generateGLB(options = {}) {
       const normAccessor = document.createAccessor().setType('VEC3').setArray(geom.normals);
       const indAccessor = document.createAccessor().setType('SCALAR').setArray(adjustedIndices);
       
-      const primitive = document.createPrimitive()
+  const primitive = document.createPrimitive()
         .setIndices(indAccessor)
         .setAttribute('POSITION', posAccessor)
         .setAttribute('NORMAL', normAccessor)
