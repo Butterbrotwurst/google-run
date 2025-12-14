@@ -1,0 +1,30 @@
+name: Deploy to Cloud Run
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          project_id: fit-coral-475719-k1
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy glb-generator \
+            --source . \
+            --region europe-west1 \
+            --allow-unauthenticated \
+            --memory 1Gi \
+            --timeout 300 \
+            --set-env-vars BUCKET_NAME=cityxz-glb-models,SIGNED_URL_TTL_MIN=15
+

@@ -63,10 +63,12 @@ app.post('/generate', async (req, res) => {
       .substring(0, 8);
     const filename = `models/${hash}-${timestamp}.glb`;
 
-    // Generate GLB file
-    console.log('[Generate] Creating GLB with color:', color || '#2B2B2B');
+    // Generate GLB file with OSM data
+    console.log('[Generate] Creating GLB from OSM data:', { lat, lon, area_km2 });
     const glbBuffer = await generateGLB({
-      color: color || '#2B2B2B',
+      lat: parseFloat(lat),
+      lon: parseFloat(lon),
+      area_km2: parseFloat(area_km2 || 1),
       address: address || `${lat}, ${lon}`
     });
 
