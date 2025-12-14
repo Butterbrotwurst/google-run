@@ -1,19 +1,12 @@
-const express = require("express");
-const app = express();
-
-app.use(express.json());
-
-app.post("/generate", (req, res) => {
-  const { address } = req.body;
-
-  // Platzhalter – hier kommt später deine GLB-Logik rein
-  res.json({
-    message: "GLB würde hier generiert werden",
-    address: address || "keine Adresse übergeben"
-  });
-});
-
-const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => {
-  console.log("Server läuft auf Port", PORT);
-});
+{
+  "name": "glb-generator-api",
+  "version": "1.0.0",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
