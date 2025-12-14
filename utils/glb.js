@@ -20,6 +20,9 @@ async function generateGLB(options = {}) {
   // Create document
   const document = new Document();
   
+  // Create buffer (required by glTF-Transform v3.10.0)
+  document.createBuffer();
+  
   // Create material with color
   const material = document.createMaterial('BoxMaterial')
     .setBaseColorFactor([r, g, b, 1.0])
