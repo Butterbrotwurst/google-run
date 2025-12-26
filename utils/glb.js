@@ -18,8 +18,15 @@ const FILTERS = {
   buildingMinArea: 1.0 // m²
 };
 
+// List of Overpass API servers for redundancy
+const OVERPASS_SERVERS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+  'https://maps.mail.ru/osm/tools/overpass/api/interpreter'
+];
+
 /**
- * Fetch OSM data from Overpass API
+ * Fetch OSM data from Overpass API with retries and failover
  */
 async function fetchOSMData(lat, lon, areaKm2) {
   const radiusKm = Math.sqrt(areaKm2 / Math.PI);
@@ -30,8 +37,9 @@ async function fetchOSMData(lat, lon, areaKm2) {
     east: lon + radiusKm / (111.32 * Math.cos(lat * Math.PI / 180))
   };
 
+  // Increased timeout to 90s
   const overpassQuery = `
-    [out:json][timeout:25];
+    [out:json][timeout:90];
     (
       way["building"](${bbox.south},${bbox.west},${bbox.north},${bbox.east});
       way["highway"~"^(primary|secondary|tertiary|residential|unclassified|service)$"](${bbox.south},${bbox.west},${bbox.north},${bbox.east});
@@ -45,17 +53,52 @@ async function fetchOSMData(lat, lon, areaKm2) {
     out skel qt;
   `;
 
-  const response = await fetch('https://overpass-api.de/api/interpreter', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: `data=${encodeURIComponent(overpassQuery)}`
-  });
+  let lastError = null;
 
-  if (!response.ok) {
-    throw new Error(`Overpass API error: ${response.status}`);
+  for (const server of OVERPASS_SERVERS) {
+    try {
+      console.log(`[GLB] Fetching from ${server}...`);
+      
+      // Node 18+ has native fetch. Add a client-side timeout slightly larger than the API timeout.
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 100000); // 100s client timeout
+      
+      const response = await fetch(server, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `data=${encodeURIComponent(overpassQuery)}`,
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const status = response.status;
+        console.warn(`[GLB] ${server} returned ${status}`);
+        // If it's a server error or rate limit, try the next server
+        if (status === 429 || status === 504 || status >= 500) {
+          lastError = new Error(`Overpass API error: ${status}`);
+          continue; 
+        }
+        throw new Error(`Overpass API error: ${status}`);
+      }
+
+      const data = await response.json();
+      if (!data || !data.elements) {
+        throw new Error('Invalid Overpass response format');
+      }
+      
+      console.log(`[GLB] Successfully fetched ${data.elements.length} elements from ${server}`);
+      return data;
+
+    } catch (err) {
+      console.warn(`[GLB] Failed to fetch from ${server}:`, err.message);
+      lastError = err;
+      // Continue to next server
+    }
   }
 
-  return await response.json();
+  throw lastError || new Error('All Overpass servers failed');
 }
 
 /**
