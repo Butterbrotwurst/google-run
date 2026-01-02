@@ -162,3 +162,8 @@ gcloud run services logs tail glb-generator --region europe-west1
 gcloud run services describe glb-generator --region europe-west1
 ```
 
+
+
+
+
+

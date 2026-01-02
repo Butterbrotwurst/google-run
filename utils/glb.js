@@ -1,5 +1,6 @@
 const { Document, NodeIO } = require('@gltf-transform/core');
 const { prune, weld } = require('@gltf-transform/functions');
+const earcut = require('earcut');
 
 // Constants (converted to meters for glTF)
 const PLATE_SIZE_M = 0.218; // 218mm = 0.218m
@@ -13,6 +14,7 @@ const HEIGHTS_M = {
   buildingMinHeight: 0.001, // 1.00mm = 0.001m
   sand: 0.0002 // 0.20mm = 0.0002m
 };
+const ROAD_WIDTH_M = 8; // Default road width in meters
 const FILTERS = {
   waterMinArea: 10.0, // m²
   buildingMinArea: 1.0 // m²
@@ -118,6 +120,56 @@ function calculateArea(latLonPoints) {
 }
 
 /**
+ * Widen a line (sequence of points) into a polygon
+ */
+function widenLine(points, widthM) {
+  if (points.length < 2) return [];
+
+  const halfWidth = widthM / 2;
+  const leftSide = [];
+  const rightSide = [];
+
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i];
+    
+    // Determine direction
+    let dx, dy;
+    
+    if (i === 0) {
+      const next = points[i + 1];
+      dx = next.x - p.x;
+      dy = next.y - p.y;
+    } else if (i === points.length - 1) {
+      const prev = points[i - 1];
+      dx = p.x - prev.x;
+      dy = p.y - prev.y;
+    } else {
+      const prev = points[i - 1];
+      const next = points[i + 1];
+      dx = next.x - prev.x;
+      dy = next.y - prev.y;
+    }
+
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len < 0.000001) {
+       leftSide.push(p);
+       rightSide.push(p);
+       continue;
+    }
+
+    // Normal vector (-dy, dx)
+    const nx = -dy / len;
+    const ny = dx / len;
+
+    leftSide.push({ x: p.x + nx * halfWidth, y: p.y + ny * halfWidth });
+    rightSide.push({ x: p.x - nx * halfWidth, y: p.y - ny * halfWidth });
+  }
+
+  // Combine into a closed polygon
+  return [...leftSide, ...rightSide.reverse()];
+}
+
+/**
  * Transform lat/lon to local coordinates (meters on plate, centered at 0,0)
  */
 function transformToPlateCoords(lat, lon, centerLat, centerLon, plateSizeM, areaKm2) {
@@ -140,7 +192,7 @@ function transformToPlateCoords(lat, lon, centerLat, centerLon, plateSizeM, area
 }
 
 /**
- * Create extruded geometry from polygon
+ * Create extruded geometry from polygon using earcut for triangulation
  */
 function createExtrudedGeometry(points, height, baseHeight = 0) {
   const positions = [];
@@ -150,15 +202,24 @@ function createExtrudedGeometry(points, height, baseHeight = 0) {
   const numPoints = points.length;
   if (numPoints < 3) return { positions: new Float32Array(0), normals: new Float32Array(0), indices: new Uint16Array(0) };
 
+  // Prepare data for earcut (flat array of [x, y, x, y...])
+  const flatPoints = [];
+  for (let i = 0; i < numPoints; i++) {
+    flatPoints.push(points[i].x, points[i].y);
+  }
+
+  // Triangulate top face (returns indices into the points array)
+  const triangles = earcut(flatPoints);
+
   // Bottom face vertices
   const bottomStart = positions.length / 3;
   for (let i = 0; i < numPoints; i++) {
     positions.push(points[i].x, points[i].y, baseHeight);
     normals.push(0, 0, -1);
   }
-  // Bottom face triangles (fan)
-  for (let i = 1; i < numPoints - 1; i++) {
-    indices.push(bottomStart, bottomStart + i, bottomStart + i + 1);
+  // Bottom face triangles (reverse winding of top)
+  for (let i = 0; i < triangles.length; i += 3) {
+    indices.push(bottomStart + triangles[i], bottomStart + triangles[i + 2], bottomStart + triangles[i + 1]);
   }
 
   // Top face vertices
@@ -167,9 +228,9 @@ function createExtrudedGeometry(points, height, baseHeight = 0) {
     positions.push(points[i].x, points[i].y, baseHeight + height);
     normals.push(0, 0, 1);
   }
-  // Top face triangles (fan, reversed)
-  for (let i = 1; i < numPoints - 1; i++) {
-    indices.push(topStart, topStart + i + 1, topStart + i);
+  // Top face triangles
+  for (let i = 0; i < triangles.length; i += 3) {
+    indices.push(topStart + triangles[i], topStart + triangles[i + 1], topStart + triangles[i + 2]);
   }
 
   // Side faces
@@ -260,6 +321,12 @@ async function generateGLB(options = {}) {
   console.log('[GLB] Fetching OSM data for', lat, lon, area_km2);
   const osmData = await fetchOSMData(lat, lon, area_km2);
 
+  // Calculate scale for features
+  const radiusKm = Math.sqrt(area_km2 / Math.PI);
+  const bboxSizeM = radiusKm * 2 * 1000;
+  const scale = PLATE_SIZE_M / bboxSizeM;
+  const roadWidthPlate = ROAD_WIDTH_M * scale;
+
   // Create document
   const document = new Document();
   document.createBuffer();
@@ -315,7 +382,7 @@ async function generateGLB(options = {}) {
       const area = calculateArea(latLonCoords);
 
       // Transform to plate coordinates
-      const coords = latLonCoords.map(n => transformToPlateCoords(n.lat, n.lon, lat, lon, PLATE_SIZE_M, area_km2));
+      let coords = latLonCoords.map(n => transformToPlateCoords(n.lat, n.lon, lat, lon, PLATE_SIZE_M, area_km2));
 
       // Determine feature type and height
       let height = 0;
@@ -327,11 +394,17 @@ async function generateGLB(options = {}) {
         const buildingHeight = parseFloat(way.tags['building:levels'] || '1') * 3; // ~3m per floor
         height = Math.max(HEIGHTS_M.buildingMinHeight, buildingHeight * HEIGHTS_M.buildingScale / 1000);
       } else if (way.tags?.highway) {
+        // Highways are lines, widen them to polygons
+        coords = widenLine(coords, roadWidthPlate);
         height = HEIGHTS_M.road;
       } else if (way.tags?.natural === 'water' || way.tags?.waterway) {
         if (area < FILTERS.waterMinArea) skip = true;
-        baseHeight = -HEIGHTS_M.waterDepth;
-        height = HEIGHTS_M.water;
+        // Water is at base level (0), so we can skip generating a mesh for it 
+        // OR generate a very thin layer if we want to ensure it covers the base plate logic.
+        // Given 'Water Height: 0.00', it implies it's at level 0.
+        // The base plate acts as the water level.
+        // To respect 'Depth', we'd need subtraction. For additive, we just leave it as base.
+        skip = true; 
       } else if (way.tags?.landuse === 'grass' || way.tags?.landuse === 'meadow' || way.tags?.landuse === 'park') {
         height = HEIGHTS_M.grass;
       } else if (way.tags?.natural === 'beach' || way.tags?.natural === 'sand') {

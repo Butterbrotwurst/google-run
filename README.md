@@ -145,3 +145,8 @@ curl -X POST https://YOUR-SERVICE-URL/generate \
 - CORS enabled for cross-origin requests from Shopify
 - Auto-scales from 0 to handle traffic
 
+
+
+
+
+

@@ -20,3 +20,8 @@ EXPOSE 8080
 # Start the application
 CMD ["node", "server.js"]
 
+
+
+
+
+

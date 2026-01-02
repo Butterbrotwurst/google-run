@@ -67,3 +67,8 @@ Cloud Run uses **Application Default Credentials** for GCS access:
 
 No API keys or credentials need to be stored in environment variables!
 
+
+
+
+
+
