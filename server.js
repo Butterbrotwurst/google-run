@@ -127,10 +127,18 @@ app.post('/generate', async (req, res) => {
 });
 
 // Start server
-app.listen(PORT, () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`GLB Generator service listening on port ${PORT}`);
   console.log(`Bucket: ${BUCKET_NAME}`);
   console.log(`Signed URL TTL: ${SIGNED_URL_TTL_MIN} minutes`);
+});
+
+// Handle graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('SIGTERM signal received: closing HTTP server');
+  server.close(() => {
+    console.log('HTTP server closed');
+  });
 });
 
 
