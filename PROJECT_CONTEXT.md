@@ -1,6 +1,6 @@
 # CityXZ 3D-Modell Generator - Projekt-Kontext
 
-**Letzte Aktualisierung:** 14. Dezember 2025  
+**Letzte Aktualisierung:** 3. Januar 2026
 **Status:** ✅ Deployed und funktionsfähig
 
 ---
